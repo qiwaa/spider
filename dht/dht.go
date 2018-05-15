@@ -16,7 +16,7 @@ type Dht struct {
 	Conn         *net.UDPConn         // udp server
 	RoutingTable *route.Routingtable  // route table
 	packets      chan *config.Packet  // receive packet chan
-	handler      handle.MsgHandler   // response handler
+	handler      handle.MsgHandler    // response handler
 	BlackList    *container.BlackList // black node list
 }
 
@@ -61,6 +61,8 @@ func (d *Dht) listen() {
 				Data: buff[:n],
 				Addr: raddr,
 			}
+
+			fmt.Println("after send packet to chan!")
 		}
 	}()
 }
@@ -74,7 +76,8 @@ func (d *Dht) Run() {
 	for {
 		select {
 		case p = <-d.packets:
-			d.handler.Handle(p)
+			fmt.Println("here!")
+			go d.handler.Handle(p)
 		}
 	}
 }

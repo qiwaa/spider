@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 )
 
+var Mgr *KrpcManager
+
 const (
 	pingType         = "ping"
 	findNodeType     = "find_node"
@@ -21,28 +23,31 @@ const (
 )
 
 type KrpcManager struct {
-	transIdIdx uint16             // transaction id index
-	maxTransId uint16             // max transaction id
-	queryChan  chan *config.Query // query request chan
-	respChan   chan *config.Resp  // query resp chan
-	dht        *dht.Dht           // dht
-	transMap   *container.SyncedMap
+	transIdIdx uint16               // transaction id index
+	maxTransId uint16               // max transaction id
+	queryChan  chan *config.Query   // query request chan
+	respChan   chan *config.Resp    // query resp chan
+	dht        *dht.Dht             // dht
+	transMap   *container.SyncedMap // transaction map
+	Metric     *config.Metric       // metric
 }
 
-func NewKrpcManager() (*KrpcManager) {
+func Init() (*KrpcManager) {
 	d := dht.NewDht()
 
-	mgr := &KrpcManager{
+	m := &KrpcManager{
 		transIdIdx: 1,
 		maxTransId: 40000,
 		queryChan:  make(chan *config.Query, 32),
 		respChan:   make(chan *config.Resp, 32),
 		dht:        d,
 		transMap:   container.NewSyncedMap(),
+		Metric:     config.NewMetric(),
 	}
+	d.SetHandler(m)
 
-	d.SetHandler(mgr)
-	return mgr
+	Mgr = m
+	return m
 }
 
 func (k *KrpcManager) Run() {
@@ -182,6 +187,7 @@ func (k *KrpcManager) makeResp(transId string, content map[string]interface{}) m
 }
 
 func (k *KrpcManager) Handle(packet *config.Packet) {
+	fmt.Println("func:Handle")
 	obj, err := bencoded.Decode(packet.Data)
 	if err != nil {
 		fmt.Println("func:Handle error! ------------")
@@ -205,6 +211,8 @@ func (k *KrpcManager) Handle(packet *config.Packet) {
 		k.handleResp(packet, data)
 	} else if y == "q" {
 		k.handleQuery(packet, data)
+	} else {
+		fmt.Println("handleError")
 	}
 }
 
@@ -218,7 +226,7 @@ func (k *KrpcManager) Join() {
 		k.FindNode(
 			&config.Node{Addr: raddr},
 			k.dht.Node.Id,
-			utils.RandomString(20),
+			k.dht.Node.Id,
 		)
 	}
 }
@@ -227,6 +235,10 @@ func (k *KrpcManager) handleResp(packet *config.Packet, data map[string]interfac
 	// obj, _ := bencoded.Decode(packet.Data)
 	// data := obj.(map[string]interface{})
 
+	if data["t"] == nil {
+		fmt.Println("resp t lacks!")
+		return
+	}
 	transId := data["t"].(string)
 	val, ok := k.transMap.Get(transId)
 	if !ok {
@@ -238,6 +250,11 @@ func (k *KrpcManager) handleResp(packet *config.Packet, data map[string]interfac
 	trans.Resp <- 0
 
 	q := trans.Data["q"].(string)
+
+	if data["r"] == nil {
+		fmt.Println("handle resp error!")
+		return
+	}
 	r := data["r"].(map[string]interface{})
 
 	id := r["id"].(string)
@@ -266,6 +283,11 @@ func (k *KrpcManager) handleQuery(packet *config.Packet, data map[string]interfa
 	str, _ := json.Marshal(data)
 	fmt.Println("receive:" + string(str))
 
+	if data["q"] == nil {
+		fmt.Println("handle query q lacks!")
+		return
+	}
+
 	q := data["q"].(string)
 	switch q {
 	case pingType:
@@ -276,6 +298,7 @@ func (k *KrpcManager) handleQuery(packet *config.Packet, data map[string]interfa
 		k.replyGetPeers(data, packet.Addr)
 	case announcePeerType:
 		fmt.Println("receive announce_peer----")
+		k.Metric.Receive.AnnouncePeer++
 	default:
 		fmt.Println("receive other type query!-------")
 	}
@@ -288,7 +311,16 @@ func (k *KrpcManager) replyPing(data map[string]interface{}, addr *net.UDPAddr) 
 		fmt.Println("replyPing error -------")
 		return errors.New("replyPing error")
 	}
+	if data["t"] == nil {
+		fmt.Println("replyPing error -------")
+		return errors.New("replyPing error")
+	}
 	a := data["a"].(map[string]interface{})
+
+	if a["id"] == nil {
+		fmt.Println("replyPing error -------")
+		return errors.New("replyPing error")
+	}
 
 	id := a["id"].(string)
 	t := data["t"].(string)
@@ -298,6 +330,9 @@ func (k *KrpcManager) replyPing(data map[string]interface{}, addr *net.UDPAddr) 
 		fmt.Println("replyPing error -------")
 		return errors.New("replyPing error")
 	}
+
+	k.Metric.Receive.Ping++
+
 	k.sendResp(node, t, map[string]interface{}{
 		"id": id[:16] + k.dht.Node.Id[16:],
 	})
@@ -308,7 +343,26 @@ func (k *KrpcManager) replyPing(data map[string]interface{}, addr *net.UDPAddr) 
 func (k *KrpcManager) replyGetPeers(data map[string]interface{}, addr *net.UDPAddr) {
 	fmt.Println("func:replyGetPeers--------")
 
+	if data["a"] == nil {
+		fmt.Println("reply getPeers a lacks!")
+		return
+	}
 	a := data["a"].(map[string]interface{})
+
+	if a["id"] == nil {
+		fmt.Println("reply getPeers a lacks!")
+		return
+	}
+	if data["t"] == nil {
+		fmt.Println("reply getPeers a lacks!")
+		return
+	}
+	if a["info_hash"] == nil {
+		fmt.Println("reply getPeers a lacks!")
+		return
+	}
+
+	k.Metric.Receive.GetPeers++
 
 	id := a["id"].(string)
 	t := data["t"].(string)
@@ -329,8 +383,20 @@ func (k *KrpcManager) replyGetPeers(data map[string]interface{}, addr *net.UDPAd
 func (k *KrpcManager) replyFindNode(data map[string]interface{}, addr *net.UDPAddr) {
 	fmt.Println("func:replyFindNode--------")
 
+	if data["a"] == nil {
+		fmt.Println("replyFindNode data error -------")
+		return
+	}
+	if data["t"] == nil {
+		fmt.Println("replyFindNode data error -------")
+		return
+	}
 	a := data["a"].(map[string]interface{})
 
+	if a["id"] == nil {
+		fmt.Println("replyFindNode data error -------")
+		return
+	}
 	id := a["id"].(string)
 	t := data["t"].(string)
 	// target := a["target"].(string)
@@ -340,6 +406,9 @@ func (k *KrpcManager) replyFindNode(data map[string]interface{}, addr *net.UDPAd
 		fmt.Println("replyFindNode error -------")
 		return
 	}
+
+	k.Metric.Receive.FindNode++
+
 	k.sendResp(node, t, map[string]interface{}{
 		"id":    id[:16] + k.dht.Node.Id[16:],
 		"nodes": utils.RandomString(26 * 3),
