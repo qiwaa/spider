@@ -1,23 +1,24 @@
 package dht
 
 import (
-	"github.com/chenminjian/spider/route"
-	"github.com/chenminjian/spider/config"
-	"net"
-	"github.com/chenminjian/spider/handle"
-	"github.com/chenminjian/spider/utils"
-	"github.com/chenminjian/spider/container"
 	"fmt"
+	"net"
+
+	"github.com/chenminjian/spider/config"
+	"github.com/chenminjian/spider/container"
+	"github.com/chenminjian/spider/handle"
+	"github.com/chenminjian/spider/route"
+	"github.com/chenminjian/spider/utils"
 )
 
 type Dht struct {
-	*config.Config                    // dht config
-	Node         *config.Node         // this dht's node
-	Conn         *net.UDPConn         // udp server
-	RoutingTable *route.Routingtable  // route table
-	packets      chan *config.Packet  // receive packet chan
-	handler      handle.MsgHandler    // response handler
-	BlackList    *container.BlackList // black node list
+	*config.Config                      // dht config
+	Node           *config.Node         // this dht's node
+	Conn           *net.UDPConn         // udp server
+	RoutingTable   *route.Routingtable  // route table
+	packets        chan *config.Packet  // receive packet chan
+	handler        handle.MsgHandler    // response handler
+	BlackList      *container.BlackList // black node list
 }
 
 func NewDht() *Dht {
@@ -36,6 +37,7 @@ func (d *Dht) SetHandler(handler handle.MsgHandler) {
 	d.handler = handler
 }
 
+// init initial dht udp listener.
 func (d *Dht) init() {
 	listener, err := net.ListenPacket("udp", d.Addr)
 	if err != nil {
@@ -45,7 +47,7 @@ func (d *Dht) init() {
 
 }
 
-// receives message from udp.
+// listen starts listener and receives message from udp.
 func (d *Dht) listen() {
 	go func() {
 		buff := make([]byte, 8192)
@@ -67,6 +69,7 @@ func (d *Dht) listen() {
 	}()
 }
 
+// Run run dht listener.
 func (d *Dht) Run() {
 	d.init()
 	d.listen()

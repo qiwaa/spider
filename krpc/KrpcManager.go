@@ -1,19 +1,24 @@
 package krpc
 
 import (
-	"github.com/chenminjian/spider/config"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/chenminjian/spider/utils"
-	"github.com/chenminjian/spider/dht"
 	"net"
 	"time"
+
 	"github.com/chenminjian/spider/bencoded"
+	"github.com/chenminjian/spider/config"
 	"github.com/chenminjian/spider/container"
-	"errors"
-	"encoding/json"
+	"github.com/chenminjian/spider/dht"
+	"github.com/chenminjian/spider/model/dao"
+	"github.com/chenminjian/spider/utils"
+	"github.com/chenminjian/spider/utils/log"
 )
 
 var Mgr *KrpcManager
+
+var logger = log.GetLogger("krpc")
 
 const (
 	pingType         = "ping"
@@ -32,7 +37,7 @@ type KrpcManager struct {
 	Metric     *config.Metric       // metric
 }
 
-func Init() (*KrpcManager) {
+func Init() *KrpcManager {
 	d := dht.NewDht()
 
 	m := &KrpcManager{
@@ -79,15 +84,13 @@ func (k *KrpcManager) fullTableFindNode() {
 	}
 }
 
+// start a query.
 func (k *KrpcManager) query(query *config.Query) {
-	// fmt.Println("func:query")
-
 	transId := query.Data["t"].(string)
 	trans := config.NewTransaction(query)
 	k.transMap.Set(transId, trans)
 
-	err := k.send(query.Node.Addr, query.Data)
-	if err != nil {
+	if err := k.send(query.Node.Addr, query.Data); err != nil {
 		fmt.Println("send query error!")
 		return
 	}
@@ -186,6 +189,7 @@ func (k *KrpcManager) makeResp(transId string, content map[string]interface{}) m
 	}
 }
 
+// Handle handles dht node's response and query.
 func (k *KrpcManager) Handle(packet *config.Packet) {
 	fmt.Println("func:Handle")
 	obj, err := bencoded.Decode(packet.Data)
@@ -222,7 +226,7 @@ func (k *KrpcManager) Join() {
 		if err != nil {
 			continue
 		}
-
+		fmt.Println("Join")
 		k.FindNode(
 			&config.Node{Addr: raddr},
 			k.dht.Node.Id,
@@ -278,7 +282,7 @@ func (k *KrpcManager) handleResp(packet *config.Packet, data map[string]interfac
 }
 
 func (k *KrpcManager) handleQuery(packet *config.Packet, data map[string]interface{}) {
-	// fmt.Println("func:handleQuery--------")
+	fmt.Println("func:handleQuery--------")
 
 	str, _ := json.Marshal(data)
 	fmt.Println("receive:" + string(str))
@@ -428,6 +432,13 @@ func (k *KrpcManager) keepFinding(nodes string) error {
 		nodeStr := string(nodes[i*26 : (i+1)*26])
 		node, _ := config.NewNodeFromCompactNodeInfo(nodeStr)
 
+		var n dao.NodeInfo
+		n.Addr = node.Addr.String()
+		n.NodeId = node.Id
+		if err := n.Add(); err != nil {
+			logger.Errorf("%+v", err)
+		}
+
 		if k.dht.BlackList.Has(node.Addr.IP.String(), node.Addr.Port) {
 			fmt.Printf("ip:%s,port:%d is in black list!\r\n", node.Addr.IP.String(), node.Addr.Port)
 			continue
@@ -438,11 +449,11 @@ func (k *KrpcManager) keepFinding(nodes string) error {
 	}
 
 	/*
-	target := utils.RandomString(20)
-	neighbors := k.dht.RoutingTable.GetNeighbors(target)
-	for _, item := range neighbors {
-		k.FindNode(item, k.dht.Node.Id[:16]+utils.RandomString(4), target)
-	}
+		target := utils.RandomString(20)
+		neighbors := k.dht.RoutingTable.GetNeighbors(target)
+		for _, item := range neighbors {
+			k.FindNode(item, k.dht.Node.Id[:16]+utils.RandomString(4), target)
+		}
 	*/
 
 	return nil
