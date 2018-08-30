@@ -1,15 +1,20 @@
 package api
 
 import (
-	"net/http"
-	"github.com/chenminjian/spider/krpc"
 	"encoding/json"
+
+	"github.com/chenminjian/spider/krpc"
+	"github.com/gin-gonic/gin"
 )
 
-func Metric(resp http.ResponseWriter, req *http.Request) {
+func Metric(c *gin.Context) {
 
 	metric := krpc.Mgr.Metric
 	buf, _ := json.Marshal(metric)
 
-	resp.Write(buf)
+	c.JSON(200, gin.H{
+		"code":    0,
+		"message": "",
+		"data":    string(buf),
+	})
 }
